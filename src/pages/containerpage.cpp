@@ -35,9 +35,42 @@ static QWidget *makeContainerTab(QListWidget *list,
     return tab;
 }
 
+// Wire a process so stdout lines populate `list` when `listArg` appears in the
+// arguments, and all output also goes to the shared terminal pane.
+static void connectProcess(QProcess *proc, QListWidget *list,
+                            const QString &listArg, QTextEdit *output)
+{
+    QObject::connect(proc, &QProcess::readyReadStandardOutput,
+                     proc, [proc, list, listArg, output] {
+        const QByteArray data = proc->readAllStandardOutput();
+        if (proc->arguments().contains(listArg)) {
+            for (const QByteArray &line : data.split('\n')) {
+                const QString text = QString::fromUtf8(line).trimmed();
+                if (!text.isEmpty())
+                    list->addItem(text);
+            }
+        }
+        output->append(QString::fromUtf8(data));
+    });
+
+    QObject::connect(proc, &QProcess::readyReadStandardError,
+                     proc, [proc, output] {
+        output->append(QString::fromUtf8(proc->readAllStandardError()));
+    });
+
+    QObject::connect(proc,
+                     QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                     output, [output](int code, QProcess::ExitStatus) {
+        output->append(code == 0
+            ? "\n[Done]"
+            : QString("\n[Failed — exit code %1]").arg(code));
+    });
+}
+
 ContainerPage::ContainerPage(QWidget *parent)
     : QWidget(parent)
-    , m_process(new QProcess(this))
+    , m_dockerProcess(new QProcess(this))
+    , m_distroboxProcess(new QProcess(this))
 {
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(20, 20, 20, 20);
@@ -49,9 +82,17 @@ ContainerPage::ContainerPage(QWidget *parent)
 
     auto *splitter = new QSplitter(Qt::Vertical, this);
 
-    m_tabs         = new QTabWidget(splitter);
-    m_dockerList   = new QListWidget;
+    m_tabs          = new QTabWidget(splitter);
+    m_dockerList    = new QListWidget;
     m_distroboxList = new QListWidget;
+
+    m_output = new QTextEdit(splitter);
+    m_output->setReadOnly(true);
+    m_output->setObjectName("terminal");
+    m_output->setPlaceholderText("Command output appears here…");
+
+    connectProcess(m_dockerProcess,    m_dockerList,    "ps",   m_output);
+    connectProcess(m_distroboxProcess, m_distroboxList, "list", m_output);
 
     m_tabs->addTab(
         makeContainerTab(m_dockerList,
@@ -67,22 +108,12 @@ ContainerPage::ContainerPage(QWidget *parent)
                          [this](const QString &a) { onDistroboxAction(a); }),
         "Distrobox");
 
-    m_output = new QTextEdit(splitter);
-    m_output->setReadOnly(true);
-    m_output->setObjectName("terminal");
-    m_output->setPlaceholderText("Command output appears here…");
-
     splitter->addWidget(m_tabs);
     splitter->addWidget(m_output);
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 1);
 
     root->addWidget(splitter, 1);
-
-    connect(m_process, &QProcess::readyReadStandardOutput, this, &ContainerPage::onProcessOutput);
-    connect(m_process, &QProcess::readyReadStandardError,  this, &ContainerPage::onProcessOutput);
-    connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [this](int code, QProcess::ExitStatus) { onProcessFinished(code); });
 
     refreshDocker();
     refreshDistrobox();
@@ -91,13 +122,13 @@ ContainerPage::ContainerPage(QWidget *parent)
 void ContainerPage::refreshDocker()
 {
     m_dockerList->clear();
-    runCommand("docker", {"ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"});
+    runDocker({"ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"});
 }
 
 void ContainerPage::refreshDistrobox()
 {
     m_distroboxList->clear();
-    runCommand("distrobox", {"list"});
+    runDistrobox({"list"});
 }
 
 void ContainerPage::onDockerAction(const QString &action)
@@ -108,9 +139,9 @@ void ContainerPage::onDockerAction(const QString &action)
     if (!item) return;
 
     const QString name = item->text().split('\t').first();
-    if (action == "Start")  runCommand("docker", {"start",  name});
-    else if (action == "Stop")   runCommand("docker", {"stop",   name});
-    else if (action == "Remove") runCommand("docker", {"rm",     name});
+    if (action == "Start")       runDocker({"start", name});
+    else if (action == "Stop")   runDocker({"stop",  name});
+    else if (action == "Remove") runDocker({"rm",    name});
 }
 
 void ContainerPage::onDistroboxAction(const QString &action)
@@ -121,45 +152,25 @@ void ContainerPage::onDistroboxAction(const QString &action)
     if (!item) return;
 
     const QString name = item->text().split('|').first().trimmed();
-    if (action == "Enter")  runCommand("distrobox", {"enter", name});
-    else if (action == "Stop")   runCommand("distrobox", {"stop",  name});
-    else if (action == "Delete") runCommand("distrobox", {"rm",    name});
+    if (action == "Enter")       runDistrobox({"enter", name});
+    else if (action == "Stop")   runDistrobox({"stop",  name});
+    else if (action == "Delete") runDistrobox({"rm",    name});
 }
 
-void ContainerPage::onProcessOutput()
+void ContainerPage::runDocker(const QStringList &args)
 {
-    const QByteArray stdOut = m_process->readAllStandardOutput();
-    const QByteArray stdErr = m_process->readAllStandardError();
-
-    if (!stdOut.isEmpty()) {
-        for (const QByteArray &line : stdOut.split('\n')) {
-            const QString text = QString::fromUtf8(line).trimmed();
-            if (text.isEmpty()) continue;
-            if (m_process->program() == "docker")
-                m_dockerList->addItem(text);
-            else if (m_process->program() == "distrobox" &&
-                     m_process->arguments().contains("list"))
-                m_distroboxList->addItem(text);
-        }
-        m_output->append(QString::fromUtf8(stdOut));
-    }
-    if (!stdErr.isEmpty())
-        m_output->append(QString::fromUtf8(stdErr));
+    if (m_dockerProcess->state() != QProcess::NotRunning)
+        m_dockerProcess->kill();
+    m_dockerProcess->setProgram("docker");
+    m_dockerProcess->setArguments(args);
+    m_dockerProcess->start();
 }
 
-void ContainerPage::onProcessFinished(int exitCode)
+void ContainerPage::runDistrobox(const QStringList &args)
 {
-    m_output->append(exitCode == 0
-        ? "\n[Done]"
-        : QString("\n[Failed — exit code %1]").arg(exitCode));
-}
-
-void ContainerPage::runCommand(const QString &program, const QStringList &args)
-{
-    if (m_process->state() != QProcess::NotRunning)
-        m_process->kill();
-
-    m_process->setProgram(program);
-    m_process->setArguments(args);
-    m_process->start();
+    if (m_distroboxProcess->state() != QProcess::NotRunning)
+        m_distroboxProcess->kill();
+    m_distroboxProcess->setProgram("distrobox");
+    m_distroboxProcess->setArguments(args);
+    m_distroboxProcess->start();
 }

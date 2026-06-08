@@ -20,15 +20,16 @@ private slots:
     void refreshDistrobox();
     void onDockerAction(const QString &action);
     void onDistroboxAction(const QString &action);
-    void onProcessOutput();
-    void onProcessFinished(int exitCode);
 
 private:
-    void runCommand(const QString &program, const QStringList &args);
+    // Each backend gets its own process so concurrent refreshes don't race.
+    void runDocker(const QStringList &args);
+    void runDistrobox(const QStringList &args);
 
     QTabWidget  *m_tabs;
     QListWidget *m_dockerList;
     QListWidget *m_distroboxList;
     QTextEdit   *m_output;
-    QProcess    *m_process;
+    QProcess    *m_dockerProcess;
+    QProcess    *m_distroboxProcess;
 };
