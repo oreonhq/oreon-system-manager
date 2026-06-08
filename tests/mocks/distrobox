@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Mock distrobox for the integration test suite.
+
+case "$*" in
+  *list*)
+    echo "ID  | NAME            | STATUS  | IMAGE"
+    echo "1   | fedora-toolbox  | running | registry.fedoraproject.org/fedora-toolbox:40"
+    echo "2   | ubuntu-dev      | stopped | docker.io/library/ubuntu:22.04"
+    ;;
+  *stop*|*rm*)
+    echo "Done."
+    ;;
+esac
+
+exit 0

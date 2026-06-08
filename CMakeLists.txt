@@ -9,8 +9,9 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Core Concurrent)
 
-set(SOURCES
-    src/main.cpp
+# All non-main code lives in a static lib so tests can link against it
+# without re-compiling every source file.
+add_library(oreon_core STATIC
     src/mainwindow.cpp
     src/widgets/sidebar.cpp
     src/pages/packagepage.cpp
@@ -19,27 +20,17 @@ set(SOURCES
     src/pages/driverspage.cpp
 )
 
-set(HEADERS
-    src/mainwindow.h
-    src/widgets/sidebar.h
-    src/pages/packagepage.h
-    src/pages/repopage.h
-    src/pages/containerpage.h
-    src/pages/driverspage.h
-)
+target_link_libraries(oreon_core PUBLIC Qt6::Widgets Qt6::Core Qt6::Concurrent)
+target_include_directories(oreon_core PUBLIC src)
 
-qt_add_executable(oreon-system-manager
-    ${SOURCES}
-    ${HEADERS}
-)
+qt_add_executable(oreon-system-manager src/main.cpp)
+target_link_libraries(oreon-system-manager PRIVATE oreon_core)
 
-target_link_libraries(oreon-system-manager PRIVATE
-    Qt6::Widgets
-    Qt6::Core
-    Qt6::Concurrent
-)
-
-target_include_directories(oreon-system-manager PRIVATE src)
+option(BUILD_TESTING "Build the test suite" ON)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 install(TARGETS oreon-system-manager
     BUNDLE  DESTINATION .

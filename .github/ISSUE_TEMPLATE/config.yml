@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussion / question
+    url: https://github.com/oreon/oreon-system-manager/discussions
+    about: Ask questions or start a discussion here instead of opening an issue.

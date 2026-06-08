@@ -1,0 +1,39 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 and build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            qt6-base-dev \
+            cmake \
+            ninja-build \
+            g++
+
+      - name: Make mock scripts executable
+        run: chmod +x tests/mocks/*
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        working-directory: build
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --output-on-failure --timeout 30

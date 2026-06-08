@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Mock docker for the integration test suite.
+
+case "$*" in
+  *"ps -a"*)
+    printf "web-server\tUp 3 hours\tnginx:latest\n"
+    printf "db\tExited (0) 1 day ago\tpostgres:16\n"
+    ;;
+  *start*|*stop*|*rm*)
+    echo "Done."
+    ;;
+esac
+
+exit 0

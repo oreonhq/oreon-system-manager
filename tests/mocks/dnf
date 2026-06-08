@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Mock dnf for the integration test suite.
+# Returns canned output that the page parsers expect.
+
+case "$*" in
+  *search*)
+    echo "vim.x86_64 : Vi IMproved — enhanced vi editor"
+    echo "vim-enhanced.x86_64 : A version of the VIM editor which includes recent enhancements"
+    echo "vim-minimal.x86_64 : A minimal version of the VIM editor"
+    ;;
+  *"repolist all"*|*"repolist"*)
+    echo "fedora                   Fedora 40 - aarch64                enabled"
+    echo "fedora-cisco-openh264    Fedora 40 openh264 (From Cisco)    enabled"
+    echo "updates                  Fedora 40 - aarch64 - Updates      enabled"
+    echo "updates-testing          Fedora 40 - aarch64 - Test Updates  disabled"
+    ;;
+  *install*)
+    echo "Installing: ${@: -1}"
+    echo "Complete!"
+    ;;
+  *remove*)
+    echo "Removing: ${@: -1}"
+    echo "Complete!"
+    ;;
+esac
+
+exit 0
