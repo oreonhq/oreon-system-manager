@@ -3,8 +3,13 @@ set -euo pipefail
 
 cargo build --release
 
-# Install icon (multiple sizes for desktop integration)
-INSTALL_PREFIX="${1:-/usr}"
+if [[ $# -eq 0 ]]; then
+    echo "Build complete: target/release/oreon-system-manager"
+    echo "Install system-wide with: sudo ./build.sh /usr"
+    exit 0
+fi
+
+INSTALL_PREFIX="$1"
 
 # Install 200x200 PNG icon
 install -Dm644 assets/logo.png \

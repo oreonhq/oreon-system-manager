@@ -177,7 +177,7 @@ impl DriversPage {
         }
         let request = ProcessRequest::new(
             "bash",
-            &["-c", "lspci -mm | awk -F'\"' '{print $2, $4}' | sort -u"],
+            &["-c", "set -o pipefail; lspci -nn | awk 'BEGIN{IGNORECASE=1} /vga|3d|display/ {line=tolower($0); if (line ~ /nvidia/) print \"NVIDIA graphics | akmod-nvidia\"; else if (line ~ /amd|ati/) print \"AMD graphics | mesa-dri-drivers\"; else if (line ~ /intel/) print \"Intel graphics | mesa-dri-drivers\"; else print \"Unknown graphics device | mesa-dri-drivers\"}' | sort -u"],
         );
         let output = imp.output.borrow().clone();
         let model = imp.driver_list.borrow().clone();
@@ -208,7 +208,7 @@ impl DriversPage {
 
     fn on_install_driver(&self) {
         if let Some(text) = self.selected_text() {
-            let pkg = text.split(' ').next().unwrap_or("");
+            let pkg = text.split('|').nth(1).map(str::trim).unwrap_or("");
             if pkg.is_empty() {
                 return;
             }

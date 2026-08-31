@@ -1,4 +1,4 @@
-use crate::process::{self, extract_package_name, parse_dnf_search_output, ProcessRequest};
+use crate::process::{self, extract_package_name, parse_dnf_list_output, parse_dnf_search_output, ProcessRequest};
 use crate::widgets::collapsible_output::CollapsibleOutput;
 use glib::subclass::prelude::ObjectSubclassIsExt;
 use gtk4::glib;
@@ -8,6 +8,8 @@ use gtk4::{
     Button, Entry, Label, Orientation, PolicyType, ScrolledWindow, SignalListItemFactory,
     StringList, StringObject,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 
 glib::wrapper! {
     pub struct PackagePage(ObjectSubclass<imp::Imp>)
@@ -67,21 +69,49 @@ mod imp {
 fn make_list_factory() -> SignalListItemFactory {
     let factory = SignalListItemFactory::new();
     factory.connect_setup(move |_f, item| {
-        let label = Label::new(None);
-        label.set_halign(gtk4::Align::Start);
-        label.set_margin_start(16);
-        label.set_margin_end(16);
-        label.set_margin_top(7);
-        label.set_margin_bottom(7);
-        item.set_child(Some(&label));
+        let row = gtk4::Box::new(Orientation::Horizontal, 16);
+        row.set_margin_start(16);
+        row.set_margin_end(16);
+        row.set_margin_top(7);
+        row.set_margin_bottom(7);
+
+        let package = Label::new(None);
+        package.set_halign(gtk4::Align::Start);
+        package.set_hexpand(true);
+        package.set_xalign(0.0);
+
+        let version = Label::new(None);
+        version.set_halign(gtk4::Align::Start);
+        version.set_xalign(0.0);
+        version.set_width_chars(24);
+
+        let repository = Label::new(None);
+        repository.set_halign(gtk4::Align::Start);
+        repository.set_xalign(0.0);
+        repository.set_width_chars(16);
+
+        row.append(&package);
+        row.append(&version);
+        row.append(&repository);
+        item.set_child(Some(&row));
     });
     factory.connect_bind(move |_f, item| {
-        let label = item
-            .child()
-            .and_then(|w| w.downcast::<Label>().ok())
-            .unwrap();
+        let row = item.child().and_then(|w| w.downcast::<gtk4::Box>().ok()).unwrap();
+        let package = row.first_child().and_then(|w| w.downcast::<Label>().ok()).unwrap();
+        let version = package.next_sibling().and_then(|w| w.downcast::<Label>().ok()).unwrap();
+        let repository = version.next_sibling().and_then(|w| w.downcast::<Label>().ok()).unwrap();
         if let Some(string_obj) = item.item().and_then(|i| i.downcast::<StringObject>().ok()) {
-            label.set_label(&string_obj.string());
+            let value = string_obj.string();
+            if let Some((name, description)) = value.split_once(" : ") {
+                package.set_label(name);
+                version.set_label(description);
+                repository.set_label("");
+            } else {
+                let mut fields = value.split_whitespace();
+                package.set_label(fields.next().unwrap_or(""));
+                version.set_label(fields.next().unwrap_or(""));
+                repository.set_label(fields.next().unwrap_or(""));
+            }
         }
     });
     factory
@@ -122,13 +152,39 @@ impl PackagePage {
         let card = gtk4::Frame::new(None);
         card.set_vexpand(true);
         let model = StringList::new(&[]);
-        let selection_model = gtk4::SingleSelection::new(Some(model.clone()));
+        let selection_model = gtk4::MultiSelection::new(Some(model.clone()));
         let factory = make_list_factory();
         let list_view = ListView::new(Some(selection_model.clone()), Some(factory));
+        let list_box = gtk4::Box::new(Orientation::Vertical, 0);
+        let headers = gtk4::Box::new(Orientation::Horizontal, 16);
+        headers.set_margin_start(16);
+        headers.set_margin_end(16);
+        headers.set_margin_top(8);
+        headers.set_margin_bottom(8);
+        let package_header = Label::new(Some("Package"));
+        package_header.set_halign(gtk4::Align::Start);
+        package_header.set_hexpand(true);
+        package_header.set_xalign(0.0);
+        let version_header = Label::new(Some("Version"));
+        version_header.set_halign(gtk4::Align::Start);
+        version_header.set_xalign(0.0);
+        version_header.set_width_chars(24);
+        let repository_header = Label::new(Some("Repository"));
+        repository_header.set_halign(gtk4::Align::Start);
+        repository_header.set_xalign(0.0);
+        repository_header.set_width_chars(16);
+        for header in [&package_header, &version_header, &repository_header] {
+            header.add_css_class("heading");
+            headers.append(header);
+        }
         let scrolled = ScrolledWindow::new();
         scrolled.set_child(Some(&list_view));
         scrolled.set_policy(PolicyType::Automatic, PolicyType::Automatic);
-        card.set_child(Some(&scrolled));
+        scrolled.set_vexpand(true);
+        list_box.append(&headers);
+        list_box.append(&gtk4::Separator::new(Orientation::Horizontal));
+        list_box.append(&scrolled);
+        card.set_child(Some(&list_box));
         box_ref.append(&card);
         box_ref.append(&gtk4::Box::new(Orientation::Vertical, 10));
 
@@ -167,8 +223,9 @@ impl PackagePage {
 
         let obj_c = obj.clone();
         selection_model.connect_selection_changed(move |sel, _, _| {
-            *obj_c.imp().selected_index.borrow_mut() = Some(sel.selected());
-            let has = sel.selected_item().is_some();
+            let first = (0..sel.n_items()).find(|index| sel.is_selected(*index));
+            *obj_c.imp().selected_index.borrow_mut() = first;
+            let has = first.is_some();
             if let Some(ref b) = *obj_c.imp().install_btn.borrow() {
                 b.set_sensitive(has);
             }
@@ -177,7 +234,49 @@ impl PackagePage {
             }
         });
 
+        obj.load_initial_packages();
         obj
+    }
+
+    fn load_initial_packages(&self) {
+        let imp = self.imp();
+        let model = imp.package_list.borrow().clone();
+        let model_c = model.clone();
+        let pending = Rc::new(RefCell::new(String::new()));
+        let pending_c = pending.clone();
+        process::run_process(
+            ProcessRequest::new(
+                "bash",
+                &[
+                    "-c",
+                    "dnf --assumeyes list available --quiet | head -n 100",
+                ],
+            ),
+            true,
+            move |is_list, text| {
+                if is_list {
+                    if let Some(ref m) = model_c {
+                        let mut data = pending_c.borrow_mut();
+                        data.push_str(text);
+                        while let Some(newline) = data.find('\n') {
+                            let line = data[..newline].to_string();
+                            data.drain(..=newline);
+                            for item in parse_dnf_list_output(&line) {
+                                m.append(&item);
+                            }
+                        }
+                    }
+                }
+            },
+            move |_| {
+                if let Some(ref m) = model {
+                    let data = pending.borrow();
+                    for item in parse_dnf_list_output(&data) {
+                        m.append(&item);
+                    }
+                }
+            },
+        );
     }
 
     fn selected_text(&self) -> Option<String> {
@@ -210,11 +309,13 @@ impl PackagePage {
             o.clear();
         }
 
-        let request = ProcessRequest::new("dnf", &["search", "--quiet", &query]);
+        let request = ProcessRequest::new("dnf", &["--assumeyes", "search", "--quiet", &query]);
         let output = imp.output.borrow().clone();
         let model = imp.package_list.borrow().clone();
         let output_c = output.clone();
         let model_c = model.clone();
+        let pending = Rc::new(RefCell::new(String::new()));
+        let pending_c = pending.clone();
         process::run_process(
             request,
             true,
@@ -224,13 +325,29 @@ impl PackagePage {
                 }
                 if is_list {
                     if let Some(ref m) = model_c {
-                        for item in parse_dnf_search_output(text) {
-                            m.append(&item);
+                        let mut data = pending_c.borrow_mut();
+                        data.push_str(text);
+                        let complete = data.rsplit_once('\n').map(|(_, rest)| rest.to_string());
+                        if let Some(rest) = complete {
+                            let ready = data[..data.len() - rest.len()].to_string();
+                            *data = rest;
+                            for item in parse_dnf_search_output(&ready) {
+                                m.append(&item);
+                            }
                         }
                     }
                 }
             },
             move |code| {
+                if let Some(ref m) = model {
+                    let mut data = pending.borrow_mut();
+                    if !data.trim().is_empty() {
+                        for item in parse_dnf_search_output(&data) {
+                            m.append(&item);
+                        }
+                        data.clear();
+                    }
+                }
                 if let Some(ref o) = output {
                     o.append(&format_result(code));
                 }

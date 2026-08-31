@@ -40,6 +40,7 @@ where
 
         let mut child = match Command::new(&program)
             .args(&args)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -99,7 +100,10 @@ where
     // Poll the channel on the main loop
     let is_list = is_list_cmd;
     glib::source::idle_add_local(move || {
-        while let Ok(msg) = receiver.try_recv() {
+        for _ in 0..32 {
+            let Ok(msg) = receiver.try_recv() else {
+                break;
+            };
             match msg {
                 ProcessMessage::Output { is_stdout, text } => {
                     if is_stdout {
@@ -122,8 +126,28 @@ where
 pub fn parse_dnf_search_output(data: &str) -> Vec<String> {
     data.lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !l.starts_with('='))
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with('=')
+                && !l.starts_with("Last metadata expiration")
+                && l.contains(" : ")
+        })
         .map(|l| l.to_string())
+        .collect()
+}
+
+pub fn parse_dnf_list_output(data: &str) -> Vec<String> {
+    data.lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("Available Packages")
+                && !line.starts_with("Installed Packages")
+                && !line.starts_with("Last metadata")
+                && line.split_whitespace().count() >= 3
+                && line.contains('.')
+        })
+        .map(ToString::to_string)
         .collect()
 }
 
@@ -131,7 +155,13 @@ pub fn parse_dnf_search_output(data: &str) -> Vec<String> {
 pub fn parse_list_output(data: &str) -> Vec<String> {
     data.lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with("repo id")
+                && !l.starts_with("Repo-id")
+                && !l.starts_with("CONTAINER")
+                && !l.starts_with("ID")
+        })
         .map(|l| l.to_string())
         .collect()
 }
@@ -149,7 +179,7 @@ pub fn parse_docker_ps_output(data: &str) -> Vec<String> {
 pub fn parse_distrobox_list_output(data: &str) -> Vec<String> {
     data.lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
+        .filter(|l| !l.is_empty() && !l.starts_with("ID") && !l.starts_with("---"))
         .map(|l| l.to_string())
         .collect()
 }
@@ -157,7 +187,7 @@ pub fn parse_distrobox_list_output(data: &str) -> Vec<String> {
 /// Extract package name from a dnf search result line.
 /// e.g. "vim.x86_64 : Vi IMproved" -> "vim"
 pub fn extract_package_name(line: &str) -> String {
-    line.split(' ')
+    line.split_whitespace()
         .next()
         .unwrap_or("")
         .split('.')
@@ -169,12 +199,12 @@ pub fn extract_package_name(line: &str) -> String {
 /// Extract repo id from a dnf repolist line.
 /// e.g. "fedora    Fedora 40 - aarch64    enabled" -> "fedora"
 pub fn extract_repo_id(line: &str) -> String {
-    line.split(' ').next().unwrap_or("").to_string()
+    line.split_whitespace().next().unwrap_or("").to_string()
 }
 
 /// Check if a repo line says "enabled"
 pub fn repo_is_enabled(line: &str) -> bool {
-    line.contains("enabled")
+    line.split_whitespace().last() == Some("enabled")
 }
 
 /// Extract container name from a docker ps line (tab-separated, first column)
@@ -184,7 +214,12 @@ pub fn extract_docker_name(line: &str) -> String {
 
 /// Extract container name from a distrobox list line (pipe-separated, first column after header)
 pub fn extract_distrobox_name(line: &str) -> String {
-    line.split('|').next().unwrap_or("").trim().to_string()
+    line.split('|')
+        .nth(1)
+        .or_else(|| line.split_whitespace().next())
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -247,7 +282,7 @@ mod tests {
             extract_distrobox_name(
                 "1   | fedora-toolbox  | running | registry.fedoraproject.org/fedora-toolbox:40"
             ),
-            "1"
+            "fedora-toolbox"
         );
     }
 }

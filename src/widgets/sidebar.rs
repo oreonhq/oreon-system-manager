@@ -84,7 +84,7 @@ impl Sidebar {
                 label: "Packages",
             },
             NavItem {
-                icon: "folder-download-symbolic",
+                icon: "folder-symbolic",
                 label: "Repositories",
             },
             NavItem {
@@ -92,7 +92,7 @@ impl Sidebar {
                 label: "Containers",
             },
             NavItem {
-                icon: "applications-engineering-symbolic",
+                icon: "preferences-system-symbolic",
                 label: "Drivers",
             },
         ];

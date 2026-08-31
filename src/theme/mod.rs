@@ -348,6 +348,14 @@ fn apply_base_css() {
     box-shadow: none;
 }
 #sidebar row:selected label {
+    color: @theme_fg_color;
+    opacity: 1;
+}
+#sidebar row:selected image {
+    color: @theme_fg_color;
+    opacity: 1;
+}
+#sidebar row:selected label {
     font-weight: 600;
 }
 "#;

@@ -1,6 +1,6 @@
 [package]
 name = "oreon-system-manager"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "All-in-one system management GUI for Fedora-based Linux distributions"
 license = "GPL-3.0"

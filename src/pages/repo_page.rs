@@ -170,7 +170,7 @@ impl RepoPage {
             o.clear();
         }
 
-        let request = ProcessRequest::new("dnf", &["repolist", "all", "--quiet"]);
+        let request = ProcessRequest::new("dnf", &["--assumeyes", "repolist", "all", "--quiet"]);
         let output = imp.output.borrow().clone();
         let model = imp.repo_list.borrow().clone();
         let output_c = output.clone();
