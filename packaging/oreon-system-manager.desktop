@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Oreon System Manager
+Comment=Manage packages, repositories, containers, and drivers on Oreon
+Exec=oreon-system-manager
+Icon=oreon-system-manager
+Type=Application
+Categories=System;Settings;PackageManager;
+Terminal=false
+StartupNotify=true
+Keywords=dnf;packages;docker;distrobox;drivers;
+X-KDE-StartupNotify=true
